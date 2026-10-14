@@ -30,7 +30,7 @@ jobs:                                         # Lista de trabajos; cada uno corr
     if: github.actor != 'dependabot[bot]'     # Evita ejecutarlo en PRs automáticos de Dependabot
     steps:                                    # Pasos del job
       - name: Descargar el código             # Nombre visible del paso
-        uses: actions/checkout@v5             # Clona el repositorio dentro del contenedor
+        uses: actions/checkout@v7             # Clona el repositorio dentro del contenedor
  
       - name: Ejecutar Semgrep                # Corre el escaneo de reglas
         run: >-                               # Comando de shell (">-" une las líneas siguientes en una sola)
