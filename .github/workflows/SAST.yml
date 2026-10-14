@@ -1,34 +1,84 @@
-name: SAST
-on:
-  push:
-    branches: [main]
-  pull_request:
-    branches: [main]
-  workflow_dispatch:
-
-permissions:
-  contents: read
-  security-events: write
-
-jobs:
-  codeql:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: github/codeql-action/init@v3
-        with:
-          languages: java-kotlin, javascript-typescript
-          build-mode: none
-          queries: security-extended
-      - uses: github/codeql-action/analyze@v3
-
-  semgrep:
-    runs-on: ubuntu-latest
-    container: semgrep/semgrep
-    steps:
-      - uses: actions/checkout@v4
-      - run: semgrep scan --config p/default --config p/owasp-top-ten --sarif --output semgrep.sarif || true
-      - uses: github/codeql-action/upload-sarif@v3
-        with:
-          sarif_file: semgrep.sarif
-          category: semgrep
+# =====================================================================
+# Pipeline SAST (Static Application Security Testing) para WebGoat
+# Ejecuta dos herramientas gratuitas sobre el código fuente:
+#   1) CodeQL  -> motor de análisis de GitHub (flujo de datos / taint)
+#   2) Semgrep -> motor de reglas basado en patrones
+# Los resultados se publican en: pestaña "Security" > "Code scanning"
+# =====================================================================
+ 
+name: SAST                                    # Nombre del workflow que aparece en la pestaña "Actions"
+ 
+on:                                           # Eventos que disparan el pipeline
+  push:                                       # 1) Cuando se hace "git push"...
+    branches: [main]                          #    ...a la rama main
+  pull_request:                               # 2) Cuando se abre/actualiza un Pull Request...
+    branches: [main]                          #    ...que apunta a la rama main
+  workflow_dispatch:                          # 3) Permite ejecutarlo manualmente con el botón "Run workflow"
+ 
+permissions:                                  # Permisos mínimos del token GITHUB_TOKEN (principio de menor privilegio)
+  contents: read                              # Solo lectura del código del repositorio
+  security-events: write                      # Necesario para subir resultados SARIF a "Code scanning"
+  actions: read                               # Permite a CodeQL leer metadatos de la ejecución del workflow
+ 
+jobs:                                         # Lista de trabajos; cada uno corre en una máquina virtual distinta y en paralelo
+ 
+  # -------------------------------------------------------------------
+  # Job 1: CodeQL
+  # -------------------------------------------------------------------
+  codeql:                                     # Identificador interno del job
+    name: CodeQL                              # Nombre visible del job en la interfaz de GitHub
+    runs-on: ubuntu-latest                    # Máquina virtual Linux proporcionada gratis por GitHub
+    steps:                                    # Pasos que se ejecutan en orden dentro del job
+      - name: Descargar el código             # Nombre visible del paso
+        uses: actions/checkout@v5             # Acción oficial que clona el repositorio dentro de la máquina virtual
+ 
+      - name: Inicializar CodeQL              # Prepara el motor CodeQL
+        uses: github/codeql-action/init@v4    # Acción oficial de GitHub que descarga e inicia CodeQL
+        with:                                 # Parámetros de la acción
+          languages: java-kotlin, javascript-typescript   # Lenguajes a analizar (WebGoat es Java + JavaScript)
+          build-mode: none                    # Analiza el código sin compilarlo con Maven (más rápido y simple)
+          queries: security-extended          # Conjunto de reglas: seguridad ampliado (más hallazgos que el default)
+ 
+      - name: Ejecutar análisis CodeQL        # Corre las consultas y genera el reporte
+        uses: github/codeql-action/analyze@v4 # Analiza la base de datos creada y sube el SARIF a GitHub automáticamente
+        with:                                 # Parámetros de la acción
+          category: codeql                    # Etiqueta para distinguir estos resultados de los de Semgrep
+ 
+  # -------------------------------------------------------------------
+  # Job 2: Semgrep
+  # -------------------------------------------------------------------
+  semgrep:                                    # Identificador interno del job
+    name: Semgrep                             # Nombre visible del job en la interfaz de GitHub
+    runs-on: ubuntu-latest                    # Máquina virtual Linux proporcionada por GitHub
+    container: semgrep/semgrep                # Ejecuta todos los pasos dentro de la imagen Docker oficial de Semgrep
+    if: github.actor != 'dependabot[bot]'     # Evita ejecutarlo en PRs automáticos de Dependabot
+    steps:                                    # Pasos del job
+      - name: Descargar el código             # Nombre visible del paso
+        uses: actions/checkout@v5             # Clona el repositorio dentro del contenedor
+ 
+      - name: Ejecutar Semgrep                # Corre el escaneo de reglas
+        run: >-                               # Comando de shell (">-" une las líneas siguientes en una sola)
+          semgrep scan
+          --config p/default
+          --config p/owasp-top-ten
+          --sarif
+          --output semgrep.sarif
+        # semgrep scan             -> inicia el análisis sobre la carpeta actual
+        # --config p/default       -> reglas recomendadas del registro público de Semgrep
+        # --config p/owasp-top-ten -> reglas enfocadas en el OWASP Top 10
+        # --sarif                  -> formato de salida estándar SARIF (lo entiende GitHub)
+        # --output semgrep.sarif   -> archivo donde se guardan los resultados
+ 
+      - name: Subir resultados a GitHub       # Publica el SARIF en "Security" > "Code scanning"
+        if: always()                          # Se ejecuta aunque el paso anterior falle, para no perder resultados
+        uses: github/codeql-action/upload-sarif@v4   # Acción oficial para cargar archivos SARIF de cualquier herramienta
+        with:                                 # Parámetros de la acción
+          sarif_file: semgrep.sarif           # Archivo generado en el paso anterior
+          category: semgrep                   # Etiqueta para distinguir estos resultados de los de CodeQL
+ 
+      - name: Guardar reporte como artefacto  # Permite descargar el SARIF desde la ejecución del workflow
+        if: always()                          # Se ejecuta siempre
+        uses: actions/upload-artifact@v4      # Acción oficial para adjuntar archivos a la ejecución
+        with:                                 # Parámetros de la acción
+          name: semgrep-sarif                 # Nombre del artefacto descargable
+          path: semgrep.sarif                 # Archivo que se adjunta
