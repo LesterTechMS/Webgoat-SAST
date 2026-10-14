@@ -1,9 +1,8 @@
 # =====================================================================
 # Pipeline SAST (Static Application Security Testing) para WebGoat
-# Ejecuta dos herramientas gratuitas sobre el código fuente:
-#   1) CodeQL  -> motor de análisis de GitHub (flujo de datos / taint)
-#   2) Semgrep -> motor de reglas basado en patrones
+# Ejecuta Semgrep (herramienta gratuita basada en reglas/patrones) sobre el código fuente.
 # Los resultados se publican en: pestaña "Security" > "Code scanning"
+# y el archivo SARIF queda descargable como artefacto de la ejecución.
 # =====================================================================
  
 name: SAST                                    # Nombre del workflow que aparece en la pestaña "Actions"
@@ -18,34 +17,11 @@ on:                                           # Eventos que disparan el pipeline
 permissions:                                  # Permisos mínimos del token GITHUB_TOKEN (principio de menor privilegio)
   contents: read                              # Solo lectura del código del repositorio
   security-events: write                      # Necesario para subir resultados SARIF a "Code scanning"
-  actions: read                               # Permite a CodeQL leer metadatos de la ejecución del workflow
  
-jobs:                                         # Lista de trabajos; cada uno corre en una máquina virtual distinta y en paralelo
- 
-  # -------------------------------------------------------------------
-  # Job 1: CodeQL
-  # -------------------------------------------------------------------
-  codeql:                                     # Identificador interno del job
-    name: CodeQL                              # Nombre visible del job en la interfaz de GitHub
-    runs-on: ubuntu-latest                    # Máquina virtual Linux proporcionada gratis por GitHub
-    steps:                                    # Pasos que se ejecutan en orden dentro del job
-      - name: Descargar el código             # Nombre visible del paso
-        uses: actions/checkout@v5             # Acción oficial que clona el repositorio dentro de la máquina virtual
- 
-      - name: Inicializar CodeQL              # Prepara el motor CodeQL
-        uses: github/codeql-action/init@v4    # Acción oficial de GitHub que descarga e inicia CodeQL
-        with:                                 # Parámetros de la acción
-          languages: java-kotlin, javascript-typescript   # Lenguajes a analizar (WebGoat es Java + JavaScript)
-          build-mode: none                    # Analiza el código sin compilarlo con Maven (más rápido y simple)
-          queries: security-extended          # Conjunto de reglas: seguridad ampliado (más hallazgos que el default)
- 
-      - name: Ejecutar análisis CodeQL        # Corre las consultas y genera el reporte
-        uses: github/codeql-action/analyze@v4 # Analiza la base de datos creada y sube el SARIF a GitHub automáticamente
-        with:                                 # Parámetros de la acción
-          category: codeql                    # Etiqueta para distinguir estos resultados de los de Semgrep
+jobs:                                         # Lista de trabajos; cada uno corre en una máquina virtual distinta
  
   # -------------------------------------------------------------------
-  # Job 2: Semgrep
+  # Job 1: Semgrep
   # -------------------------------------------------------------------
   semgrep:                                    # Identificador interno del job
     name: Semgrep                             # Nombre visible del job en la interfaz de GitHub
@@ -63,7 +39,7 @@ jobs:                                         # Lista de trabajos; cada uno corr
           --config p/owasp-top-ten
           --sarif
           --output semgrep.sarif
-        # semgrep scan             -> inicia el análisis sobre la carpeta actual
+        # semgrep scan             -> inicia el análisis sobre la carpeta actual (respeta el archivo .semgrepignore)
         # --config p/default       -> reglas recomendadas del registro público de Semgrep
         # --config p/owasp-top-ten -> reglas enfocadas en el OWASP Top 10
         # --sarif                  -> formato de salida estándar SARIF (lo entiende GitHub)
@@ -71,10 +47,10 @@ jobs:                                         # Lista de trabajos; cada uno corr
  
       - name: Subir resultados a GitHub       # Publica el SARIF en "Security" > "Code scanning"
         if: always()                          # Se ejecuta aunque el paso anterior falle, para no perder resultados
-        uses: github/codeql-action/upload-sarif@v4   # Acción oficial para cargar archivos SARIF de cualquier herramienta
+        uses: github/codeql-action/upload-sarif@v4   # Acción oficial de GitHub para cargar archivos SARIF de cualquier herramienta (no ejecuta CodeQL)
         with:                                 # Parámetros de la acción
           sarif_file: semgrep.sarif           # Archivo generado en el paso anterior
-          category: semgrep                   # Etiqueta para distinguir estos resultados de los de CodeQL
+          category: semgrep                   # Etiqueta que identifica estos resultados en "Code scanning"
  
       - name: Guardar reporte como artefacto  # Permite descargar el SARIF desde la ejecución del workflow
         if: always()                          # Se ejecuta siempre
@@ -82,3 +58,48 @@ jobs:                                         # Lista de trabajos; cada uno corr
         with:                                 # Parámetros de la acción
           name: semgrep-sarif                 # Nombre del artefacto descargable
           path: semgrep.sarif                 # Archivo que se adjunta
+ 
+  # -------------------------------------------------------------------
+  # Job 2 (REFERENCIA, DESACTIVADO): enviar el SARIF a DefectDojo
+  # -------------------------------------------------------------------
+  # En este proyecto el SARIF se sube a DefectDojo de forma MANUAL desde la
+  # interfaz web (DefectDojo corre localmente en http://localhost:8080).
+  # Este job muestra cómo se automatizaría. Para activarlo:
+  #   1) DefectDojo debe estar publicado en internet (GitHub no puede
+  #      llegar al "localhost" de tu PC) o usar un runner self-hosted.
+  #   2) Crear en GitHub > Settings > Secrets and variables > Actions:
+  #        DEFECTDOJO_URL   -> dirección de DefectDojo (ej. https://dojo.miempresa.com)
+  #        DEFECTDOJO_TOKEN -> token de DefectDojo (menú de usuario > API v2 Key)
+  #   3) Quitar el "#" inicial de las líneas del job.
+  #
+  # defectdojo:                                 # Identificador interno del job
+  #   name: Enviar a DefectDojo                 # Nombre visible del job
+  #   needs: semgrep                            # Espera a que termine el job de Semgrep
+  #   if: always()                              # Se ejecuta aunque Semgrep reporte hallazgos
+  #   runs-on: ubuntu-latest                    # Máquina virtual Linux (ya incluye curl)
+  #   steps:                                    # Pasos del job
+  #     - name: Descargar el SARIF de Semgrep   # Nombre visible del paso
+  #       uses: actions/download-artifact@v4    # Recupera el artefacto guardado por el job semgrep
+  #       with:                                 # Parámetros de la acción
+  #         name: semgrep-sarif                 # Mismo nombre usado en upload-artifact
+  #
+  #     - name: Subir SARIF a DefectDojo        # Nombre visible del paso
+  #       run: >-                               # Comando de shell (las líneas se unen en una sola)
+  #         curl -sSf -X POST "${{ secrets.DEFECTDOJO_URL }}/api/v2/reimport-scan/"
+  #         -H "Authorization: Token ${{ secrets.DEFECTDOJO_TOKEN }}"
+  #         -F "scan_type=SARIF"
+  #         -F "file=@semgrep.sarif"
+  #         -F "product_type_name=Aplicaciones de práctica"
+  #         -F "product_name=WebGoat"
+  #         -F "engagement_name=CI GitHub Actions"
+  #         -F "auto_create_context=true"
+  #         -F "close_old_findings=true"
+  #       # curl -sSf -X POST .../reimport-scan/  -> llama a la API; reimport actualiza la misma prueba en cada ejecución
+  #       # -H "Authorization: Token ..."          -> autenticación con el token guardado como secreto
+  #       # -F "scan_type=SARIF"                   -> parser de DefectDojo que interpreta el archivo
+  #       # -F "file=@semgrep.sarif"               -> archivo que se envía
+  #       # -F "product_type_name=..."             -> tipo de producto (se crea si no existe)
+  #       # -F "product_name=WebGoat"              -> producto (aplicación) donde se guardan los hallazgos
+  #       # -F "engagement_name=..."               -> engagement que agrupa los análisis del pipeline
+  #       # -F "auto_create_context=true"          -> crea producto y engagement si no existen
+  #       # -F "close_old_findings=true"           -> cierra los hallazgos que ya no aparecen (vulnerabilidad corregida)
