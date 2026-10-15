@@ -4,6 +4,7 @@
 # Los resultados se publican en: pestaña "Security" > "Code scanning"
 # y el archivo SARIF queda descargable como artefacto de la ejecución.
 # =====================================================================
+
  
 name: SAST                                    # Nombre del workflow que aparece en la pestaña "Actions"
  
