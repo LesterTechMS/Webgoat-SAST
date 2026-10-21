@@ -55,7 +55,7 @@ jobs:                                         # Lista de trabajos; cada uno corr
  
       - name: Guardar reporte como artefacto  # Permite descargar el SARIF desde la ejecución del workflow
         if: always()                          # Se ejecuta siempre
-        uses: actions/upload-artifact@v4      # Acción oficial para adjuntar archivos a la ejecución
+        uses: actions/upload-artifact@v7      # Acción oficial para adjuntar archivos a la ejecución
         with:                                 # Parámetros de la acción
           name: semgrep-sarif                 # Nombre del artefacto descargable
           path: semgrep.sarif                 # Archivo que se adjunta
